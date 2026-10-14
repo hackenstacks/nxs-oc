@@ -1,0 +1,11 @@
+*.bak*
+*.backup*
+*.log
+server.log
+ssl/
+*.pem
+*.key
+__pycache__/
+*.pyc
+.active-theme
+*.fossil

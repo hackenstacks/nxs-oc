@@ -3259,7 +3259,7 @@ OVERALL SUMMARY:
             if(!prompt) {
               // build prompt from recent scene context
               let prompt_msgs = await db.messages.where("threadId").equals(threadId).sortBy("id");
-              prompt = prompt_msgs.filter(m => m.characterId !== -2 && m.content).slice(-6).map(m => String(m.content)).join(" ").slice(0, 300) || "a dramatic scene";
+              prompt = prompt_msgs.filter(m => m.characterId !== -2 && m.message).slice(-6).map(m => String(m.message)).join(" ").slice(0, 300) || "a dramatic scene";
             }
             await nxsGenerateImages(prompt, 1, threadId);
           } else if(message.startsWith("/name ") || message.startsWith("/avatar ")) {
@@ -4087,13 +4087,12 @@ OVERALL SUMMARY:
         loadingEl.remove();
 
         // Add as a system message in the feed
-        let messageObj = {
+        let messageObj = createMessageObj({
           threadId,
-          characterId: -2, // system
-          content: `🖼️ **Scene images** — *${prompt.slice(0,80)}${prompt.length>80?"…":""}*\n\n${imgHtml}`,
+          characterId: -2,
+          message: `🖼️ *${prompt.slice(0,80)}${prompt.length>80?"…":""}*\n\n${imgHtml}`,
           hiddenFrom: [],
-          creationTime: Date.now(),
-        };
+        });
         messageObj.id = await addMessageToDb(messageObj);
         await appendMessageToFeed(messageObj);
         $.messageFeed.scrollTop = $.messageFeed.scrollHeight;
@@ -4106,11 +4105,11 @@ OVERALL SUMMARY:
         let character = await db.characters.get(characterId);
         let msgs = await db.messages.where("threadId").equals(threadId).sortBy("id");
         let recent = msgs
-          .filter(m => m.characterId !== -2 && m.content)  // skip system + empty
+          .filter(m => m.characterId !== -2 && m.message)  // skip system + empty
           .slice(-8)
           .map(m => {
             let who = m.characterId === -1 ? "User" : (character?.name || "Character");
-            return `${who}: ${String(m.content).slice(0, 120)}`;
+            return `${who}: ${String(m.message).slice(0, 120)}`;
           }).join(" | ");
         let charDesc = character?.roleInstruction?.slice(0, 150) || "";
         let scene = [charDesc, recent].filter(Boolean).join(". ");

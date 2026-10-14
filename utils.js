@@ -455,7 +455,44 @@ export function objectKeysAndTypesAreValid(obj, schema) {
 }
 
 export function addBackgroundToElement(el, color) {
-  if (el) el.style.background = color;
+  if (!el) return { currentUrl: null, change: () => {}, filter: () => {} };
+  if (color !== undefined) { el.style.background = color; }
+
+  let mediaEl = null;
+
+  function change(url) {
+    ctrl.currentUrl = url || null;
+    // Remove previous media element
+    if (mediaEl) { mediaEl.remove(); mediaEl = null; }
+    el.style.backgroundImage = '';
+    el.style.backgroundSize  = '';
+    el.style.backgroundPosition = '';
+    if (!url) return;
+    const isVideo = /\.(mp4|webm|ogg|mov)(\?|$)/i.test(url);
+    if (isVideo) {
+      mediaEl = document.createElement('video');
+      mediaEl.src = url;
+      mediaEl.autoplay = true;
+      mediaEl.loop = true;
+      mediaEl.muted = true;
+      mediaEl.playsInline = true;
+      mediaEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none;';
+      el.style.position = 'relative';
+      el.insertBefore(mediaEl, el.firstChild);
+    } else {
+      el.style.backgroundImage    = `url(${JSON.stringify(url)})`;
+      el.style.backgroundSize     = 'cover';
+      el.style.backgroundPosition = 'center';
+    }
+  }
+
+  function filter(val) {
+    if (mediaEl) mediaEl.style.filter = val || '';
+    else el.style.filter = val || '';
+  }
+
+  const ctrl = { currentUrl: null, change, filter };
+  return ctrl;
 }
 
 export function importStylesheet(url) {

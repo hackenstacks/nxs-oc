@@ -2290,49 +2290,66 @@ OVERALL SUMMARY:
           let result = "";
           let chunkI = 0;
           let prevText = null;
+          let lineBuf = ""; // accumulate partial SSE lines across reads
           const streamId = (await sha256Text(Math.random().toString()+Math.random().toString())).slice(0, 16);
           while(true) {
             const res = await reader?.read();
             if(res?.done) break;
-            if(res?.value.trim().startsWith("{")) { // errors don't start with 'data'
-              let json = JSON.parse(res.value);
-              alert("Error:\n\n"+JSON.stringify(json.error, null, 2));
-              break;
-            } else if(res?.value.trim().startsWith("data:")) {
-              // can be multiple 'data: {...}' lines in a single response
-              for(let line of res.value.split("\n").filter(l => l.trim()).map(l => l.trim().slice(6))) {
-                if(line === "[DONE]") break;
-                let json;
+            if(!res?.value) continue;
+
+            // Accumulate into line buffer and process only complete lines
+            lineBuf += res.value;
+            const rawLines = lineBuf.split("\n");
+            lineBuf = rawLines.pop(); // last element may be incomplete — keep buffered
+
+            for(const rawLine of rawLines) {
+              const trimmed = rawLine.trim();
+              if(!trimmed) continue;
+
+              // Error response — doesn't start with 'data:'
+              if(trimmed.startsWith("{")) {
                 try {
-                  json = JSON.parse(line);
-                } catch(e) {
-                  console.error(e);
-                  alert(`The streaming API response had some invalid JSON:\n\n${line}\n\n---\n\n${res?.value}`);
-                }
-                let text;
-
-                if(json.choices[0].text) { // this indicates that we're streaming from a 'general' (non-chat) model
-                  text = json.choices[0].text;
-                  if(chunkI===0) text = text.trimStart(); // trimStart due to the way we prompt 'general' models (we show messages with a space after `[name]:`)
-                } else {
-                  if(json.choices[0].delta.role) continue; // first response always starts with a role=assistant delta to indicate that the assistant is the one talking
-                  if(!json.choices[0].delta.content) continue; // final response alway has empty delta object
-                  text = json.choices[0].delta.content;
-                }
-                
-                result += text;
-                onStreamingReplyChunk({text, isFirst:chunkI===0});
-
-                // we keep the StreamingMessageChunk events "one step behind" so that we can set last:true on the last chunk
-                if(prevText === null) {
-                  prevText = text;
-                } else {
-                  triggerStreamingMessageChunkCustomCodeEvent(threadId, {text:prevText, index:chunkI-1, last:false, streamId});
-                  prevText = text;
-                }
-
-                chunkI++;
+                  const errJson = JSON.parse(trimmed);
+                  if(errJson.error) { alert("Error:\n\n"+JSON.stringify(errJson.error, null, 2)); return result; }
+                } catch(e) {}
+                continue;
               }
+
+              if(!trimmed.startsWith("data:")) continue;
+              const line = trimmed.slice(5).trim();
+              if(line === "[DONE]") return result;
+              if(!line) continue;
+
+              let json;
+              try {
+                json = JSON.parse(line);
+              } catch(e) {
+                console.warn("SSE partial/invalid JSON (skipped):", line.slice(0, 80));
+                continue; // skip — partial line will be completed in next read
+              }
+
+              if(!json?.choices?.[0]) continue; // empty choices (preamble/filter event)
+
+              let text;
+              if(json.choices[0].text) {
+                text = json.choices[0].text;
+                if(chunkI===0) text = text.trimStart();
+              } else {
+                if(json.choices[0].delta?.role) continue;
+                if(!json.choices[0].delta?.content) continue;
+                text = json.choices[0].delta.content;
+              }
+
+              result += text;
+              onStreamingReplyChunk({text, isFirst:chunkI===0});
+
+              if(prevText === null) {
+                prevText = text;
+              } else {
+                triggerStreamingMessageChunkCustomCodeEvent(threadId, {text:prevText, index:chunkI-1, last:false, streamId});
+                prevText = text;
+              }
+              chunkI++;
             }
           }
           triggerStreamingMessageChunkCustomCodeEvent(threadId, {text:prevText, index:chunkI-1, last:true, streamId});

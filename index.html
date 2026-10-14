@@ -337,10 +337,11 @@
               <button id="editReminderMessageButton" style="font-size:0.7rem;">✏️ reminder msg</button>
             </div> -->
             <div style="display:flex;">
-              <textarea id="messageInput" style="flex-grow:1; min-height:4rem; font-size:100%;" title="commands:&#10;/ai - prompt a reply from ai&#10;/ai &lt;instruction&gt; - prompt reply with instruction&#10;/user &lt;instruction&gt; - generate a user reply&#10;/sys &lt;message&gt; - reply as system&#10;/sum - edit summary&#10;/mem - add custom memory/lore entries&#10;/name &lt;name&gt; - set your name for this thread&#10;/avatar &lt;url&gt; - set your avatar image for this thread&#10;/import - add chat messages in bulk&#10;&#10;Note: You can add '/ai &lt;instruction&gt;' as the final line in your normal messages to instruct AI for its reply."></textarea>
+              <textarea id="messageInput" style="flex-grow:1; min-height:4rem; font-size:100%;" title="commands:&#10;/ai - prompt a reply from ai&#10;/ai &lt;instruction&gt; - prompt reply with instruction&#10;/user &lt;instruction&gt; - generate a user reply&#10;/sys &lt;message&gt; - reply as system&#10;/sum - edit summary&#10;/mem - add custom memory/lore entries&#10;/name &lt;name&gt; - set your name for this thread&#10;/avatar &lt;url&gt; - set your avatar image for this thread&#10;/import - add chat messages in bulk&#10;/image &lt;prompt&gt; - generate image from prompt (or scene if no prompt)&#10;&#10;Note: You can add '/ai &lt;instruction&gt;' as the final line in your normal messages to instruct AI for its reply."></textarea>
               <div style="display:flex; flex-direction:column; margin-left:0.25rem;">
                 <button id="sendButton" style="min-width:80px; flex-grow:1;">send</button>
                 <button id="replyWithButton" style="min-width:80px; margin-top:0.25rem;">reply with…</button>
+                <button id="nxsImageButton" title="Double-click: generate 3 scene images&#10;/image {prompt}: generate 1 image" style="min-width:80px; margin-top:0.25rem; font-size:1.2rem;">🖼️</button>
               </div>
             </div>
           </div>
@@ -3252,6 +3253,15 @@ OVERALL SUMMARY:
               break;
             }
             $.messageInput.value = "";
+          } else if(message.trim().startsWith("/image") || message.trim().startsWith("/img")) {
+            let prompt = message.trim().replace(/^\/(image|img)\s*/, "").trim();
+            $.messageInput.value = "";
+            if(!prompt) {
+              // build prompt from recent scene context
+              let msgs = oc.thread.messages.slice(-6).filter(m => m.author !== "system").map(m => m.content).join(" ");
+              prompt = msgs.slice(0, 300) || "a dramatic scene";
+            }
+            await nxsGenerateImages(prompt, 1, threadId);
           } else if(message.startsWith("/name ") || message.startsWith("/avatar ")) {
             let arg = message.replace(/^\/(name|avatar) /, "");
             let thread = await db.threads.get(threadId);
@@ -4047,6 +4057,81 @@ OVERALL SUMMARY:
 
 
       $.sendButton.addEventListener("click", sendButtonClickHandler);
+
+      // ── NeXuS Image Generation ───────────────────────────────────────────────
+      const NXS_BASE = window.location.origin;
+
+      async function nxsGenerateImages(prompt, count, threadId) {
+        count = count || 1;
+        // Show a loading placeholder in the feed
+        let loadingEl = document.createElement("div");
+        loadingEl.style.cssText = "padding:0.5rem 1rem; color: var(--text-muted, #888); font-style:italic;";
+        loadingEl.textContent = `🖼️ Generating ${count} image${count>1?"s":""}…`;
+        $.messageFeed.appendChild(loadingEl);
+        $.messageFeed.scrollTop = $.messageFeed.scrollHeight;
+
+        const models = ["flux", "turbo", "flux-realism"];
+        const seeds  = [Math.floor(Math.random()*9999), Math.floor(Math.random()*9999), Math.floor(Math.random()*9999)];
+        const urls   = Array.from({length: count}, (_, i) => {
+          const model = models[i % models.length];
+          const seed  = seeds[i];
+          const enc   = encodeURIComponent(prompt);
+          return `${NXS_BASE}/api/pollinations/image?prompt=${enc}&model=${model}&width=512&height=512&seed=${seed}&nologo=true`;
+        });
+
+        // Build image HTML block
+        let imgHtml = urls.map((url, i) =>
+          `<img src="${url}" alt="generated image ${i+1}" style="max-width:100%; border-radius:6px; margin:4px 2px; display:inline-block;" loading="lazy" onerror="this.alt='image failed to load'">`
+        ).join("\n");
+
+        loadingEl.remove();
+
+        // Add as a system message in the feed
+        let messageObj = {
+          threadId,
+          characterId: -2, // system
+          content: `🖼️ **Scene images** — *${prompt.slice(0,80)}${prompt.length>80?"…":""}*\n\n${imgHtml}`,
+          hiddenFrom: [],
+          creationTime: Date.now(),
+        };
+        messageObj.id = await addMessageToDb(messageObj);
+        await appendMessageToFeed(messageObj);
+        $.messageFeed.scrollTop = $.messageFeed.scrollHeight;
+      }
+
+      // Scene image builder — extracts last N messages and summarises into a visual prompt
+      async function nxsBuildScenePrompt() {
+        let threadId = parseInt($.messageFeed.dataset.threadId);
+        let characterId = parseInt($.messageFeed.dataset.characterId);
+        let character = await db.characters.get(characterId);
+        let msgs = await db.messages.where("threadId").equals(threadId).sortBy("id");
+        let recent = msgs.slice(-8).filter(m => m.author !== "system").map(m => {
+          let who = m.characterId === -1 ? "User" : (character?.name || "Character");
+          return `${who}: ${m.content.slice(0,120)}`;
+        }).join(" | ");
+        let charDesc = character?.roleInstruction?.slice(0,150) || "";
+        let scene = [charDesc, recent].filter(Boolean).join(". ");
+        return scene.slice(0, 400) || "a dramatic fantasy scene";
+      }
+
+      // 🖼️ button — single click = hint, double click = 3 scene images
+      $.nxsImageButton.addEventListener("dblclick", async (e) => {
+        e.preventDefault();
+        let threadId = parseInt($.messageFeed.dataset.threadId);
+        if(!threadId) return alert("Open a thread first.");
+        $.nxsImageButton.disabled = true;
+        $.nxsImageButton.textContent = "⏳";
+        try {
+          let prompt = await nxsBuildScenePrompt();
+          await nxsGenerateImages(prompt, 3, threadId);
+        } catch(err) {
+          alert("Image generation error: " + err.message);
+        } finally {
+          $.nxsImageButton.disabled = false;
+          $.nxsImageButton.textContent = "🖼️";
+        }
+      });
+      // ── end NeXuS Image Generation ───────────────────────────────────────────
 
       async function doBotReplyInPlaceOfUser(characterToReplyWith) {
         let threadCharacter = await db.characters.get(parseInt($.messageFeed.dataset.characterId));

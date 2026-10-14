@@ -21229,7 +21229,7 @@ async function uploadImageAsync() {
   // URL encode the JSON string
   const urlEncodedJson = encodeURIComponent(characterJson);
 
-  const finalUrl = `https://localhost/play.html#${urlEncodedJson}`;
+  const finalUrl = `${window.location.origin}${window.location.pathname}#${urlEncodedJson}`; // nxs-oc: use current origin
 
   return finalUrl;
 }

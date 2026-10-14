@@ -438,7 +438,7 @@ export function createLoadingModal(message="Loading...") {
   el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;color:#fff;font-size:1.2rem;';
   el.textContent = message;
   document.body.appendChild(el);
-  return { remove: () => el.remove() };
+  return { remove: () => el.remove(), delete: () => el.remove() };
 }
 
 export function applyObjectOverrides(target, overrides) {

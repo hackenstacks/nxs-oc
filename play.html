@@ -12258,14 +12258,12 @@ body.isMobile #news-panel {
               let usersOriginalDbVersion = db.verno;
               if (usersOriginalDbVersion < dbVersion) {
                 let result = await prompt2({
-                  message: { type: "none", "html": `<p style="margin:0;">A database upgrade will be done when you click continue. A full export/backup will be downloaded first in case anything goes wrong.</p>` },
+                  message: { type: "none", "html": `<p style="margin:0;">A database upgrade will be done when you click continue.</p>` },
                 }, { cancelButtonText: null, submitButtonText: "Continue" });
 
                 dbLoadingModal = createLoadingModal(`Please wait...<br><span style="font-size:80%; opacity:0.6;">This could take a while if you have a lot of data.</span>`);
 
-                const originalDbJsonBlob = await db.export({ prettyJson: true });
-                let yyyymmdd = new Date().toISOString().split("T")[0];
-                downloadTextOrBlob(originalDbJsonBlob, `opencharacters-export-${yyyymmdd}.json`);
+                // nxs-oc: auto-backup download suppressed — use Export manually if needed
               }
               await db.close(); // we need to close before db.version() call below and re-open afterwards
             } else {

@@ -3258,8 +3258,8 @@ OVERALL SUMMARY:
             $.messageInput.value = "";
             if(!prompt) {
               // build prompt from recent scene context
-              let msgs = oc.thread.messages.slice(-6).filter(m => m.author !== "system").map(m => m.content).join(" ");
-              prompt = msgs.slice(0, 300) || "a dramatic scene";
+              let prompt_msgs = await db.messages.where("threadId").equals(threadId).sortBy("id");
+              prompt = prompt_msgs.filter(m => m.characterId !== -2 && m.content).slice(-6).map(m => String(m.content)).join(" ").slice(0, 300) || "a dramatic scene";
             }
             await nxsGenerateImages(prompt, 1, threadId);
           } else if(message.startsWith("/name ") || message.startsWith("/avatar ")) {
@@ -4099,17 +4099,20 @@ OVERALL SUMMARY:
         $.messageFeed.scrollTop = $.messageFeed.scrollHeight;
       }
 
-      // Scene image builder — extracts last N messages and summarises into a visual prompt
+      // Scene image builder — extracts last N messages into a visual prompt
       async function nxsBuildScenePrompt() {
         let threadId = parseInt($.messageFeed.dataset.threadId);
         let characterId = parseInt($.messageFeed.dataset.characterId);
         let character = await db.characters.get(characterId);
         let msgs = await db.messages.where("threadId").equals(threadId).sortBy("id");
-        let recent = msgs.slice(-8).filter(m => m.author !== "system").map(m => {
-          let who = m.characterId === -1 ? "User" : (character?.name || "Character");
-          return `${who}: ${m.content.slice(0,120)}`;
-        }).join(" | ");
-        let charDesc = character?.roleInstruction?.slice(0,150) || "";
+        let recent = msgs
+          .filter(m => m.characterId !== -2 && m.content)  // skip system + empty
+          .slice(-8)
+          .map(m => {
+            let who = m.characterId === -1 ? "User" : (character?.name || "Character");
+            return `${who}: ${String(m.content).slice(0, 120)}`;
+          }).join(" | ");
+        let charDesc = character?.roleInstruction?.slice(0, 150) || "";
         let scene = [charDesc, recent].filter(Boolean).join(". ");
         return scene.slice(0, 400) || "a dramatic fantasy scene";
       }

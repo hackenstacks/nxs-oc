@@ -336,6 +336,13 @@
             <!-- <div style="display:flex;margin-bottom: 0.25rem;">
               <button id="editReminderMessageButton" style="font-size:0.7rem;">✏️ reminder msg</button>
             </div> -->
+            <!-- NeXuS provider/model selector -->
+            <div id="nxsBar" style="display:flex; gap:0.3rem; padding:0.25rem 0; align-items:center; flex-wrap:wrap;">
+              <span style="font-size:0.75rem; opacity:0.6; white-space:nowrap;">⚡ NXS</span>
+              <select id="nxsProviderSelect" title="LLM provider" style="flex:1; min-width:100px; font-size:0.8rem; padding:2px 4px;"></select>
+              <input id="nxsModelInput" placeholder="model (blank=default)" title="Model name — leave blank to use provider default" style="flex:2; min-width:120px; font-size:0.8rem; padding:2px 4px;">
+              <span id="nxsStatus" style="font-size:0.75rem; min-width:1.2rem; text-align:center;" title="Provider status">●</span>
+            </div>
             <div style="display:flex;">
               <textarea id="messageInput" style="flex-grow:1; min-height:4rem; font-size:100%;" title="commands:&#10;/ai - prompt a reply from ai&#10;/ai &lt;instruction&gt; - prompt reply with instruction&#10;/user &lt;instruction&gt; - generate a user reply&#10;/sys &lt;message&gt; - reply as system&#10;/sum - edit summary&#10;/mem - add custom memory/lore entries&#10;/name &lt;name&gt; - set your name for this thread&#10;/avatar &lt;url&gt; - set your avatar image for this thread&#10;/import - add chat messages in bulk&#10;/image &lt;prompt&gt; - generate image from prompt (or scene if no prompt)&#10;&#10;Note: You can add '/ai &lt;instruction&gt;' as the final line in your normal messages to instruct AI for its reply."></textarea>
               <div style="display:flex; flex-direction:column; margin-left:0.25rem;">
@@ -4151,6 +4158,100 @@ OVERALL SUMMARY:
         }
       });
       // ── end NeXuS Image Generation ───────────────────────────────────────────
+
+      // ── NeXuS Provider/Model Selector ────────────────────────────────────────
+      (async function nxsProviderBar() {
+        const sel   = $.nxsProviderSelect;
+        const mdl   = $.nxsModelInput;
+        const dot   = $.nxsStatus;
+
+        // Restore saved state
+        mdl.value = window.nxsModel || '';
+
+        function updateStatus(pid, providers) {
+          const p = providers && providers[pid];
+          if (!p) { dot.textContent = '●'; dot.style.color = '#888'; dot.title = 'unknown'; return; }
+          if (!p.requires_key || p.key_present) {
+            dot.textContent = '●'; dot.style.color = '#4caf50'; dot.title = p.key_present ? '✓ ready' : '✓ free';
+          } else {
+            dot.textContent = '●'; dot.style.color = '#f44'; dot.title = '🔒 no key';
+          }
+        }
+
+        // Load providers from Bifrost
+        let providers = {};
+        try {
+          const res = await fetch(`${NXS_BASE}/api/providers`);
+          const data = await res.json();
+          providers = data.providers || {};
+        } catch(e) {
+          // Fallback: hardcode known chat providers
+          providers = {
+            pollinations: {label:'Pollinations',requires_key:false,key_present:true,kind:'chat'},
+            groq:         {label:'Groq',        requires_key:true, key_present:false,kind:'chat'},
+            mistral:      {label:'Mistral',      requires_key:true, key_present:false,kind:'chat'},
+            openrouter:   {label:'OpenRouter',   requires_key:true, key_present:false,kind:'chat'},
+            deepseek:     {label:'DeepSeek',     requires_key:true, key_present:false,kind:'chat'},
+            google:       {label:'Google',       requires_key:true, key_present:false,kind:'chat'},
+            grok:         {label:'xAI Grok',     requires_key:true, key_present:false,kind:'chat'},
+            cerebras:     {label:'Cerebras',     requires_key:true, key_present:false,kind:'chat'},
+            ollama:       {label:'Ollama (local)',requires_key:false,key_present:true, kind:'chat'},
+            'nexus-router':{label:'NeXuS Router',requires_key:false,key_present:true, kind:'chat'},
+          };
+        }
+
+        // Populate dropdown — chat providers only, ready ones first
+        const chatProviders = Object.entries(providers)
+          .filter(([,p]) => p.kind && p.kind.includes('chat'))
+          .sort(([,a],[,b]) => {
+            const ra = !a.requires_key || a.key_present ? 0 : 1;
+            const rb = !b.requires_key || b.key_present ? 0 : 1;
+            return ra - rb || (a.label||'').localeCompare(b.label||'');
+          });
+
+        sel.innerHTML = chatProviders.map(([id, p]) => {
+          const ready = !p.requires_key || p.key_present;
+          const tag   = !p.requires_key ? ' (free)' : p.key_present ? ' ✓' : ' 🔒';
+          return `<option value="${id}"${id===window.nxsProvider?' selected':''}>${p.label||id}${tag}</option>`;
+        }).join('');
+
+        updateStatus(window.nxsProvider, providers);
+
+        // Model hints per provider
+        const MODEL_HINTS = {
+          pollinations: ['openai','gpt-4o','claude-sonnet-4-5','gemini-2.0-flash','deepseek-r1','llama','mistral'],
+          groq:         ['llama-3.3-70b-versatile','llama-3.1-8b-instant','gemma2-9b-it','mixtral-8x7b-32768'],
+          mistral:      ['mistral-large-latest','mistral-medium-latest','mistral-small-latest','codestral-latest'],
+          openrouter:   ['openai/gpt-4o','anthropic/claude-3.5-sonnet','google/gemini-2.0-flash','meta-llama/llama-3.3-70b-instruct'],
+          deepseek:     ['deepseek-chat','deepseek-reasoner'],
+          google:       ['gemini-2.0-flash','gemini-2.0-flash-thinking-exp','gemini-1.5-pro'],
+          grok:         ['grok-3','grok-3-mini','grok-2'],
+          cerebras:     ['llama-3.3-70b','llama3.1-8b'],
+          ollama:       ['llama3.2','llama3.1','mistral','gemma2','qwen2.5'],
+          'nexus-router':['auto','gpt-6-luna','merlin-auto'],
+        };
+
+        function refreshHints(pid) {
+          const hints = MODEL_HINTS[pid] || [];
+          let dl = document.getElementById('nxsModelList');
+          if (!dl) { dl = document.createElement('datalist'); dl.id = 'nxsModelList'; document.body.appendChild(dl); }
+          dl.innerHTML = hints.map(m => `<option value="${m}">`).join('');
+          mdl.setAttribute('list', 'nxsModelList');
+        }
+        refreshHints(window.nxsProvider);
+
+        sel.addEventListener('change', () => {
+          const pid = sel.value;
+          window.nxsSetProvider(pid, mdl.value.trim());
+          updateStatus(pid, providers);
+          refreshHints(pid);
+        });
+
+        mdl.addEventListener('change', () => {
+          window.nxsSetProvider(sel.value, mdl.value.trim());
+        });
+      })();
+      // ── end NeXuS Provider/Model Selector ────────────────────────────────────
 
       async function doBotReplyInPlaceOfUser(characterToReplyWith) {
         let threadCharacter = await db.characters.get(parseInt($.messageFeed.dataset.characterId));
